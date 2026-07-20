@@ -1,6 +1,16 @@
 -- SAFESTACK Institution Pricing
 -- Migration 00004: Add institution columns + seed 2026 institutional rates
 
+-- ===== CREATE SYSTEM USER FOR REFERENCE ROWS =====
+-- Required because pricing_data.user_id has FK -> profiles(id) -> auth.users(id)
+INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, confirmation_sent_at, confirmation_token, recovery_token, email_change_token_new, email_change, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_super_admin, phone_confirmed_at)
+VALUES ('00000000-0000-0000-0000-000000000000', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'system@safestack.app', '', now(), now(), '', '', '', '', '{"provider":"email"}', '{}', now(), now(), false, now())
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO profiles (id, email, full_name)
+VALUES ('00000000-0000-0000-0000-000000000000', 'system@safestack.app', 'System')
+ON CONFLICT (id) DO NOTHING;
+
 -- ===== ADD COLUMNS TO PRICING_DATA =====
 ALTER TABLE pricing_data ADD COLUMN IF NOT EXISTS institution TEXT;
 ALTER TABLE pricing_data ADD COLUMN IF NOT EXISTS source TEXT;
