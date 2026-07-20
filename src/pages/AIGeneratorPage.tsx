@@ -68,7 +68,7 @@ export default function AIGeneratorPage() {
         content = await callAI(systemMsg, prompt);
       }
       setResult(content);
-      const html = await generateDocumentHTML(content);
+      const html = await generateDocumentHTML(content, docType);
       setResultHtml(html);
     } catch (err: any) {
       setResult('Error: ' + (err.message || 'Generation failed'));
