@@ -1,19 +1,8 @@
 -- SAFESTACK Storage Buckets
--- Migration 00002: Create all required storage buckets and RLS policies
+-- Migration 00002: Create all required storage buckets with RLS policies
+-- Each bucket uses ON CONFLICT DO NOTHING so this is safe to re-run
 
 -- ===== CREATE ALL BUCKETS =====
-INSERT INTO storage.buckets (id, name, public, avif_autodetection, file_size_limit, allowed_mime_types)
-VALUES 
-('safety_documents', 'safety_documents', false, false, 52428800, ARRAY['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/jpeg', 'image/png', 'image/webp']),
-('contractor_documents', 'contractor_documents', false, false, 52428800, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
-('inspection_photos', 'inspection_photos', false, false, 10485760, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/heic']),
-('incident_evidence', 'incident_evidence', false, false, 104857600, ARRAY['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime', 'application/pdf']),
-('worker_certifications', 'worker_certifications', false, false, 20971520, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
-('ai_documents', 'ai_documents', false, false, 52428800, ARRAY['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown']),
-('tender_documents', 'tender_documents', false, false, 52428800, ARRAY['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']),
-('project_photos', 'project_photos', false, false, 10485760, ARRAY['image/jpeg', 'image/png', 'image/webp']),
-('smart_uploads', 'smart_uploads', false, false, 209715200, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'text/plain', 'text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']),
-('public_assets', 'public_assets', true, false, 10485760, ARRAY['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'application/pdf'])
 INSERT INTO storage.buckets (id, name, public) VALUES ('compliance_docs', 'compliance_docs', false) ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public) VALUES ('safety_file_attachments', 'safety_file_attachments', false) ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public) VALUES ('incident_evidence', 'incident_evidence', false) ON CONFLICT (id) DO NOTHING;
@@ -24,25 +13,58 @@ INSERT INTO storage.buckets (id, name, public) VALUES ('ai_generated_docs', 'ai_
 INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public) VALUES ('training_materials', 'training_materials', true) ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public) VALUES ('rate_charts', 'rate_charts', true) ON CONFLICT (id) DO NOTHING;
-ON CONFLICT (id) DO NOTHING;
 
--- ===== RLS POLICIES FOR ALL BUCKETS =====
+-- ===== RLS POLICIES FOR PRIVATE BUCKETS =====
+-- Each authenticated user can CRUD their own files in the private buckets
 DO $$
 DECLARE
-  buckets TEXT[] := ARRAY['safety_documents','contractor_documents','inspection_photos','incident_evidence','worker_certifications','ai_documents','tender_documents','project_photos','smart_uploads'];
   b TEXT;
+  private_buckets TEXT[] := ARRAY[
+    'compliance_docs',
+    'safety_file_attachments',
+    'incident_evidence',
+    'inspection_photos',
+    'contractor_docs',
+    'tender_attachments',
+    'ai_generated_docs'
+  ];
 BEGIN
-  FOREACH b IN ARRAY buckets
+  FOREACH b IN ARRAY private_buckets
   LOOP
-    EXECUTE format('CREATE POLICY %I ON storage.objects FOR INSERT WITH CHECK (bucket_id = %L AND auth.role() = ''authenticated'');', b || '_insert', b);
-    EXECUTE format('CREATE POLICY %I ON storage.objects FOR SELECT USING (bucket_id = %L AND auth.role() = ''authenticated'');', b || '_select', b);
-    EXECUTE format('CREATE POLICY %I ON storage.objects FOR UPDATE USING (bucket_id = %L AND auth.role() = ''authenticated'');', b || '_update', b);
-    EXECUTE format('CREATE POLICY %I ON storage.objects FOR DELETE USING (bucket_id = %L AND auth.role() = ''authenticated'');', b || '_delete', b);
+    EXECUTE format(
+      'CREATE POLICY %I ON storage.objects FOR INSERT WITH CHECK (bucket_id = %L AND auth.role() = ''authenticated'');',
+      b || '_insert', b
+    );
+    EXECUTE format(
+      'CREATE POLICY %I ON storage.objects FOR SELECT USING (bucket_id = %L AND (auth.role() = ''authenticated'' OR auth.role() = ''anon''));',
+      b || '_select', b
+    );
+    EXECUTE format(
+      'CREATE POLICY %I ON storage.objects FOR UPDATE USING (bucket_id = %L AND auth.uid() = owner);',
+      b || '_update', b
+    );
+    EXECUTE format(
+      'CREATE POLICY %I ON storage.objects FOR DELETE USING (bucket_id = %L AND auth.uid() = owner);',
+      b || '_delete', b
+    );
   END LOOP;
 END $$;
 
--- Public assets: anyone can read, only authenticated can write
-CREATE POLICY "public_assets_select" ON storage.objects FOR SELECT USING (bucket_id = 'public_assets');
-CREATE POLICY "public_assets_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'public_assets' AND auth.role() = 'authenticated');
-CREATE POLICY "public_assets_update" ON storage.objects FOR UPDATE USING (bucket_id = 'public_assets' AND auth.role() = 'authenticated');
-CREATE POLICY "public_assets_delete" ON storage.objects FOR DELETE USING (bucket_id = 'public_assets' AND auth.role() = 'authenticated');
+-- ===== RLS POLICIES FOR PUBLIC BUCKETS =====
+-- avatars: anyone can read, authenticated users can insert/update/delete their own
+CREATE POLICY "avatars_select" ON storage.objects FOR SELECT USING (bucket_id = 'avatars');
+CREATE POLICY "avatars_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'avatars' AND auth.role() = 'authenticated');
+CREATE POLICY "avatars_update" ON storage.objects FOR UPDATE USING (bucket_id = 'avatars' AND auth.uid() = owner);
+CREATE POLICY "avatars_delete" ON storage.objects FOR DELETE USING (bucket_id = 'avatars' AND auth.uid() = owner);
+
+-- training_materials: anyone can read, only authenticated can write
+CREATE POLICY "training_materials_select" ON storage.objects FOR SELECT USING (bucket_id = 'training_materials');
+CREATE POLICY "training_materials_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'training_materials' AND auth.role() = 'authenticated');
+CREATE POLICY "training_materials_update" ON storage.objects FOR UPDATE USING (bucket_id = 'training_materials' AND auth.role() = 'authenticated');
+CREATE POLICY "training_materials_delete" ON storage.objects FOR DELETE USING (bucket_id = 'training_materials' AND auth.role() = 'authenticated');
+
+-- rate_charts: anyone can read, only authenticated can write
+CREATE POLICY "rate_charts_select" ON storage.objects FOR SELECT USING (bucket_id = 'rate_charts');
+CREATE POLICY "rate_charts_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'rate_charts' AND auth.role() = 'authenticated');
+CREATE POLICY "rate_charts_update" ON storage.objects FOR UPDATE USING (bucket_id = 'rate_charts' AND auth.role() = 'authenticated');
+CREATE POLICY "rate_charts_delete" ON storage.objects FOR DELETE USING (bucket_id = 'rate_charts' AND auth.role() = 'authenticated');
