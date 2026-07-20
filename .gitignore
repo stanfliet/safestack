@@ -4,15 +4,5 @@ dist
 .env.local
 *.log
 .DS_Store
-
 .vercel/
-
 nul
-
-.vercel/
-
-nul
-
-.vercel/
-
-.env.local

@@ -14,6 +14,16 @@ VALUES
 ('project_photos', 'project_photos', false, false, 10485760, ARRAY['image/jpeg', 'image/png', 'image/webp']),
 ('smart_uploads', 'smart_uploads', false, false, 209715200, ARRAY['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'text/plain', 'text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']),
 ('public_assets', 'public_assets', true, false, 10485760, ARRAY['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'application/pdf'])
+INSERT INTO storage.buckets (id, name, public) VALUES ('compliance_docs', 'compliance_docs', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('safety_file_attachments', 'safety_file_attachments', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('incident_evidence', 'incident_evidence', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('inspection_photos', 'inspection_photos', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('contractor_docs', 'contractor_docs', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('tender_attachments', 'tender_attachments', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('ai_generated_docs', 'ai_generated_docs', false) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('training_materials', 'training_materials', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('rate_charts', 'rate_charts', true) ON CONFLICT (id) DO NOTHING;
 ON CONFLICT (id) DO NOTHING;
 
 -- ===== RLS POLICIES FOR ALL BUCKETS =====

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import AppLayout from './components/layout/AppLayout';
 
+const InstitutionPricingPage = lazy(() => import('./pages/InstitutionPricingPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="ai-agents" element={<AIAgentsPage />} />
           <Route path="tenders" element={<TendersPage />} />
           <Route path="pricing-database" element={<PricingDatabasePage />} />
+          <Route path="pricing-database/:institution" element={<InstitutionPricingPage />} />
           <Route path="compliance" element={<ComplianceDashboardPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="contractor-onboarding" element={<ContractorOnboardingPage />} />
