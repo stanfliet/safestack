@@ -2,23 +2,49 @@
 -- Migration 00001: All tables, enums, RLS policies
 
 -- ===== ENUMS =====
-CREATE TYPE project_status AS ENUM ('planning', 'construction', 'handover', 'completed', 'cancelled');
-CREATE TYPE inspection_status AS ENUM ('scheduled', 'in_progress', 'completed', 'overdue');
-CREATE TYPE incident_severity AS ENUM ('critical', 'high', 'medium', 'low');
-CREATE TYPE incident_status AS ENUM ('open', 'investigating', 'resolved', 'closed');
-CREATE TYPE tender_status AS ENUM ('draft', 'submitted', 'won', 'lost', 'cancelled');
-CREATE TYPE worker_status AS ENUM ('active', 'inactive', 'suspended');
-CREATE TYPE compliance_status AS ENUM ('compliant', 'non_compliant', 'not_applicable', 'pending');
-CREATE TYPE billing_plan AS ENUM ('free', 'starter', 'professional', 'enterprise');
-CREATE TYPE billing_status AS ENUM ('active', 'past_due', 'canceled', 'trialing');
-CREATE TYPE user_role AS ENUM ('user', 'admin', 'super_admin');
-CREATE TYPE ai_doc_type AS ENUM ('template', 'smart', 'custom');
-CREATE TYPE ai_doc_status AS ENUM ('draft', 'generating', 'completed', 'failed');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_status') THEN
+    CREATE TYPE project_status AS ENUM ('planning', 'construction', 'handover', 'completed', 'cancelled');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'inspection_status') THEN
+    CREATE TYPE inspection_status AS ENUM ('scheduled', 'in_progress', 'completed', 'overdue');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'incident_severity') THEN
+    CREATE TYPE incident_severity AS ENUM ('critical', 'high', 'medium', 'low');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'incident_status') THEN
+    CREATE TYPE incident_status AS ENUM ('open', 'investigating', 'resolved', 'closed');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tender_status') THEN
+    CREATE TYPE tender_status AS ENUM ('draft', 'submitted', 'won', 'lost', 'cancelled');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'worker_status') THEN
+    CREATE TYPE worker_status AS ENUM ('active', 'inactive', 'suspended');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'compliance_status') THEN
+    CREATE TYPE compliance_status AS ENUM ('compliant', 'non_compliant', 'not_applicable', 'pending');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'billing_plan') THEN
+    CREATE TYPE billing_plan AS ENUM ('free', 'starter', 'professional', 'enterprise');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'billing_status') THEN
+    CREATE TYPE billing_status AS ENUM ('active', 'past_due', 'canceled', 'trialing');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    CREATE TYPE user_role AS ENUM ('user', 'admin', 'super_admin');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ai_doc_type') THEN
+    CREATE TYPE ai_doc_type AS ENUM ('template', 'smart', 'custom');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ai_doc_status') THEN
+    CREATE TYPE ai_doc_status AS ENUM ('draft', 'generating', 'completed', 'failed');
+  END IF;
+END $$;
 
 -- ===== TABLES =====
 
 -- Profiles (extends auth.users)
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT,
   full_name TEXT,
@@ -31,7 +57,7 @@ CREATE TABLE profiles (
 );
 
 -- Projects
-CREATE TABLE projects (
+CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -47,7 +73,7 @@ CREATE TABLE projects (
 );
 
 -- Safety Files
-CREATE TABLE safety_files (
+CREATE TABLE IF NOT EXISTS safety_files (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -60,7 +86,7 @@ CREATE TABLE safety_files (
 );
 
 -- Risk Assessments
-CREATE TABLE risk_assessments (
+CREATE TABLE IF NOT EXISTS risk_assessments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -76,7 +102,7 @@ CREATE TABLE risk_assessments (
 );
 
 -- Inspections
-CREATE TABLE inspections (
+CREATE TABLE IF NOT EXISTS inspections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -93,7 +119,7 @@ CREATE TABLE inspections (
 );
 
 -- Incidents
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -112,7 +138,7 @@ CREATE TABLE incidents (
 );
 
 -- Workers
-CREATE TABLE workers (
+CREATE TABLE IF NOT EXISTS workers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -132,7 +158,7 @@ CREATE TABLE workers (
 );
 
 -- Tenders
-CREATE TABLE tenders (
+CREATE TABLE IF NOT EXISTS tenders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -150,7 +176,7 @@ CREATE TABLE tenders (
 );
 
 -- Pricing Database
-CREATE TABLE pricing_data (
+CREATE TABLE IF NOT EXISTS pricing_data (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   category TEXT NOT NULL,
@@ -167,7 +193,7 @@ CREATE TABLE pricing_data (
 );
 
 -- Compliance Items
-CREATE TABLE compliance_items (
+CREATE TABLE IF NOT EXISTS compliance_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -181,7 +207,7 @@ CREATE TABLE compliance_items (
 );
 
 -- Contractors (onboarding)
-CREATE TABLE contractors (
+CREATE TABLE IF NOT EXISTS contractors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   company_name TEXT NOT NULL,
@@ -201,7 +227,7 @@ CREATE TABLE contractors (
 );
 
 -- Subscriptions / Billing
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   plan billing_plan DEFAULT 'free',
@@ -216,7 +242,7 @@ CREATE TABLE subscriptions (
 );
 
 -- Invoices
-CREATE TABLE invoices (
+CREATE TABLE IF NOT EXISTS invoices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
@@ -231,7 +257,7 @@ CREATE TABLE invoices (
 );
 
 -- AI Generated Documents
-CREATE TABLE ai_documents (
+CREATE TABLE IF NOT EXISTS ai_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -245,7 +271,7 @@ CREATE TABLE ai_documents (
 );
 
 -- Cookie Consent
-CREATE TABLE cookie_consents (
+CREATE TABLE IF NOT EXISTS cookie_consents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   ip_address TEXT,

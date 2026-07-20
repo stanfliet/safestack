@@ -14,6 +14,7 @@ const RiskAssessmentsPage = lazy(() => import('./pages/RiskAssessmentsPage'));
 const InspectionsPage = lazy(() => import('./pages/InspectionsPage'));
 const IncidentsPage = lazy(() => import('./pages/IncidentsPage'));
 const WorkersPage = lazy(() => import('./pages/WorkersPage'));
+const TrainingPage = lazy(() => import('./pages/TrainingPage'));
 const AIGeneratorPage = lazy(() => import('./pages/AIGeneratorPage'));
 const AIAgentsPage = lazy(() => import('./pages/AIAgentsPage'));
 const TendersPage = lazy(() => import('./pages/TendersPage'));
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="inspections" element={<InspectionsPage />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="workers" element={<WorkersPage />} />
+          <Route path="training" element={<TrainingPage />} />
           <Route path="ai-generator" element={<AIGeneratorPage />} />
           <Route path="ai-agents" element={<AIAgentsPage />} />
           <Route path="tenders" element={<TendersPage />} />

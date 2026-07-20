@@ -17,12 +17,16 @@ interface AuthState {
   profile: any | null;
   loading: boolean;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
+  hasFreeAccess: boolean;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signUp: (email: string, password: string, fullName: string, company?: string) => Promise<{ error: AuthError | null; user: User | null }>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
+
+const FREE_ACCESS_EMAILS = ['hambaniks@gmail.com'];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -33,20 +37,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const u = session?.user ?? null;
       setUser(u as User | null);
-      if (u) loadProfile(u.id);
+      if (u) loadProfile(u);
       setLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const u = session?.user ?? null;
       setUser(u as User | null);
-      if (u) loadProfile(u.id);
+      if (u) loadProfile(u);
       else { setProfile(null); }
     });
     return () => subscription?.unsubscribe();
   }, []);
 
-  async function loadProfile(userId: string) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+  async function loadProfile(u: User) {
+    let { data } = await supabase.from('profiles').select('*').eq('id', u.id).single();
+    
+    // Auto-set admin role for free access emails
+    if (u.email && FREE_ACCESS_EMAILS.includes(u.email.toLowerCase())) {
+      if (!data || (data.role !== 'admin' && data.role !== 'super_admin')) {
+        await supabase.from('profiles').update({ role: 'admin' }).eq('id', u.id);
+        data = { ...data, role: 'admin' };
+      }
+    }
+    
     setProfile(data);
   }
 
@@ -58,7 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signUp(email: string, password: string, fullName: string, company?: string) {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (data.user && !error) {
-      await supabase.from('profiles').upsert({ id: data.user.id, email, full_name: fullName, company: company || null, role: 'user' });
+      // Determine role based on email
+      const role = FREE_ACCESS_EMAILS.includes(email.toLowerCase()) ? 'admin' : 'user';
+      await supabase.from('profiles').upsert({ 
+        id: data.user.id, email, full_name: fullName, company: company || null, role 
+      });
     }
     return { error, user: data.user as User | null };
   }
@@ -68,10 +85,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null); setProfile(null);
   }
 
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const hasFreeAccess = isAdmin || isSuperAdmin || (user?.email ? FREE_ACCESS_EMAILS.includes(user.email.toLowerCase()) : false);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isSuperAdmin, hasFreeAccess, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

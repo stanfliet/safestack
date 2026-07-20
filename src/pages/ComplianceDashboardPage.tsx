@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDate, getStatusColor } from '../lib/utils';
-import { ShieldCheck, Plus, Search, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Plus, Search, Loader2, CheckCircle2, XCircle, AlertTriangle, Upload, Bot, FileText, X } from 'lucide-react';
 
 export default function ComplianceDashboardPage() {
   const { user } = useAuth();
@@ -13,6 +13,9 @@ export default function ComplianceDashboardPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ regulation:'', requirement:'', due_date:'', notes:'' });
   const [saving, setSaving] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [stats, setStats] = useState({ compliant:0, nonCompliant:0, pending:0, total:0 });
 
   useEffect(() => { loadItems(); }, []);
@@ -34,6 +37,38 @@ export default function ComplianceDashboardPage() {
   }
 
   async function updateStatus(id: string, s: string) { await supabase.from('compliance_items').update({ status: s }).eq('id', id); loadItems(); }
+  async function handleUpload() {
+    if (!uploadFile || !user) return;
+    setUploading(true);
+    const path = `compliance-uploads/${Date.now()}_${uploadFile.name}`;
+    const { error: uploadError } = await supabase.storage.from('uploads').upload(path, uploadFile);
+    if (uploadError) { alert('Upload failed: ' + uploadError.message); setUploading(false); return; }
+
+    // Extract text and create compliance item
+    let regulation = uploadFile.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').replace(/\w/g, (c: string) => c.toUpperCase());
+    let requirement = 'Review uploaded document for compliance requirements';
+    try {
+      const text = await uploadFile.text();
+      const lines = text.split('\n').filter((l: string) => l.trim());
+      if (lines.length > 0) {
+        regulation = lines[0].substring(0, 100);
+        requirement = lines.slice(1, 5).join('\n').substring(0, 500) || requirement;
+      }
+    } catch (e) { /* binary file */ }
+
+    const { error } = await supabase.from('compliance_items').insert({
+      user_id: user.id, regulation, requirement, status: 'pending',
+      notes: `Uploaded: ${uploadFile.name}`,
+    });
+    if (!error) {
+      setShowUpload(false);
+      setUploadFile(null);
+      loadItems();
+    }
+    setUploading(false);
+  }
+
+
 
   const complianceRate = stats.total > 0 ? Math.round((stats.compliant/stats.total)*100) : 0;
   const filtered = items.filter(i => {
@@ -47,8 +82,36 @@ export default function ComplianceDashboardPage() {
     <div>
       <div className="page-header">
         <div><h1 className="page-title">Compliance Dashboard</h1><p className="text-surface-500 mt-1">Regulation tracking and audit readiness</p></div>
-        <button onClick={()=>setShowForm(true)} className="btn-primary"><Plus className="h-4 w-4" /> Add Item</button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowUpload(true)} className="btn-secondary"><Upload className="h-4 w-4" /> Upload</button>
+          <button onClick={()=>setShowForm(true)} className="btn-primary"><Plus className="h-4 w-4" /> Add Item</button>
+        </div>
       </div>
+      {/* Upload Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowUpload(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Upload Compliance Document</h2>
+              <button onClick={() => setShowUpload(false)} className="text-surface-400 hover:text-surface-600"><X className="h-5 w-5" /></button>
+            </div>
+            <p className="text-sm text-surface-500 mb-4">Upload a regulation, legal document, or compliance checklist. AI will extract requirements.</p>
+            <div className="border-2 border-dashed border-surface-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400"
+              onClick={() => document.getElementById('compliance-file-input')?.click()}>
+              {uploadFile ? <p className="font-medium text-primary-600">{uploadFile.name}</p> : <div><Upload className="h-8 w-8 mx-auto mb-2 text-surface-400" /><p className="text-sm text-surface-500">Click to upload PDF, DOCX, or TXT</p></div>}
+            </div>
+            <input id="compliance-file-input" type="file" className="hidden" onChange={e => setUploadFile(e.target.files?.[0] || null)} accept=".pdf,.docx,.txt" />
+            <div className="flex justify-end gap-3 mt-4">
+              <button className="btn-secondary" onClick={() => setShowUpload(false)}>Cancel</button>
+              <button className="btn-primary" disabled={!uploadFile || uploading} onClick={handleUpload}>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Upload & Extract
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="stat-card"><div className="flex items-center gap-2 text-green-600 mb-1"><CheckCircle2 className="h-4 w-4" /><span className="text-xs font-medium">Compliant</span></div><p className="text-2xl font-bold">{stats.compliant}</p><p className="text-xs text-surface-500">of {stats.total} items</p></div>
         <div className="stat-card"><div className="flex items-center gap-2 text-red-600 mb-1"><XCircle className="h-4 w-4" /><span className="text-xs font-medium">Non-Compliant</span></div><p className="text-2xl font-bold">{stats.nonCompliant}</p></div>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDate, formatCurrency, getStatusColor } from '../lib/utils';
-import { FileSpreadsheet, Plus, Search, Loader2, Calendar, DollarSign } from 'lucide-react';
+import { FileSpreadsheet, Plus, Search, Loader2, Calendar, DollarSign, Upload, Bot, FileText, X } from 'lucide-react';
 
 export default function TendersPage() {
   const { user } = useAuth();
@@ -14,6 +14,9 @@ export default function TendersPage() {
   const [selected, setSelected] = useState<any>(null);
   const [form, setForm] = useState({ title:'', client_name:'', tender_number:'', issue_date:'', submission_date:'', budget:'', description:'', notes:'' });
   const [saving, setSaving] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => { loadTenders(); }, []);
 
@@ -36,6 +39,27 @@ export default function TendersPage() {
   }
 
   async function updateStatus(id: string, s: string) { await supabase.from('tenders').update({ status: s }).eq('id', id); loadTenders(); }
+  async function handleUpload() {
+    if (!uploadFile || !user) return;
+    setUploading(true);
+    const path = `tender-uploads/${Date.now()}_${uploadFile.name}`;
+    const { error: uploadError } = await supabase.storage.from('uploads').upload(path, uploadFile);
+    if (uploadError) { alert('Upload failed: ' + uploadError.message); setUploading(false); return; }
+
+    // Create tender from upload if no title entered yet
+    const title = uploadFile.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').replace(/\w/g, (c: string) => c.toUpperCase());
+    const { error } = await supabase.from('tenders').insert({
+      user_id: user.id, title, status: 'draft',
+      description: `Uploaded document: ${uploadFile.name}`,
+    });
+    if (!error) {
+      setShowUpload(false);
+      setUploadFile(null);
+      loadTenders();
+    }
+    setUploading(false);
+  }
+
 
   const filtered = tenders.filter(t => {
     if (statusFilter!=='all' && t.status!==statusFilter) return false;
@@ -48,8 +72,36 @@ export default function TendersPage() {
     <div>
       <div className="page-header">
         <div><h1 className="page-title">Tenders</h1><p className="text-surface-500 mt-1">Manage tenders and track bid status</p></div>
-        <button onClick={()=>setShowForm(true)} className="btn-primary"><Plus className="h-4 w-4" /> New Tender</button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowUpload(true)} className="btn-secondary"><Upload className="h-4 w-4" /> Upload</button>
+          <button onClick={()=>setShowForm(true)} className="btn-primary"><Plus className="h-4 w-4" /> New Tender</button>
+        </div>
       </div>
+      {/* Upload Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowUpload(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Upload Tender Document</h2>
+              <button onClick={() => setShowUpload(false)} className="text-surface-400 hover:text-surface-600"><X className="h-5 w-5" /></button>
+            </div>
+            <p className="text-sm text-surface-500 mb-4">Upload a tender document, scope of works, or pricing schedule. The document will be linked to this tender record.</p>
+            <div className="border-2 border-dashed border-surface-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary-400"
+              onClick={() => document.getElementById('tender-file-input')?.click()}>
+              {uploadFile ? <p className="font-medium text-primary-600">{uploadFile.name}</p> : <div><Upload className="h-8 w-8 mx-auto mb-2 text-surface-400" /><p className="text-sm text-surface-500">Click to upload PDF, DOCX, XLSX, or TXT</p></div>}
+            </div>
+            <input id="tender-file-input" type="file" className="hidden" onChange={e => setUploadFile(e.target.files?.[0] || null)} accept=".pdf,.docx,.xlsx,.csv,.txt" />
+            <div className="flex justify-end gap-3 mt-4">
+              <button className="btn-secondary" onClick={() => setShowUpload(false)}>Cancel</button>
+              <button className="btn-primary" disabled={!uploadFile || uploading} onClick={handleUpload}>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-3 mb-6">
         <div className="flex-1 min-w-[200px]"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-surface-400" /><input className="input pl-10" placeholder="Search tenders..." value={search} onChange={e=>setSearch(e.target.value)} /></div></div>
         <select className="input w-auto" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>

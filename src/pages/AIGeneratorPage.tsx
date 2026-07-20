@@ -1,153 +1,329 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Bot, FileText, Sparkles, Type, Loader2, Send, ChevronRight } from 'lucide-react';
+import { callOpenAI, callAI, callGemini, generateDocumentHTML } from '../lib/openai';
+import { Bot, FileText, AlertTriangle, ClipboardCheck, Loader2, Copy, Check, Download, Edit3, Save, X, Upload, Eye, FileUp } from 'lucide-react';
+import { formatDate } from '../lib/utils';
 
-type GenMode = 'template' | 'smart' | 'custom';
-
-const templates = [
-  { id: 'safety_plan', label: 'Safety Plan', icon: FileText, desc: 'Comprehensive site-specific safety plan' },
-  { id: 'risk_assessment', label: 'Risk Assessment', icon: AlertTriangle, desc: 'Detailed risk assessment matrix' },
-  { id: 'method_statement', label: 'Method Statement', icon: FileText, desc: 'Safe work method statement' },
-  { id: 'incident_report', label: 'Incident Report', icon: AlertOctagon, desc: 'Formal incident investigation report' },
-  { id: 'inspection_checklist', label: 'Inspection Checklist', icon: ClipboardCheck, desc: 'Custom inspection checklist' },
-  { id: 'training_record', label: 'Training Record', icon: BookOpen, desc: 'Worker training acknowledgement form' },
+const MODES = [
+  { id: 'document', label: 'OHS Document', icon: FileText, desc: 'Generate policies, plans, registers, method statements' },
+  { id: 'risk', label: 'Risk Assessment', icon: AlertTriangle, desc: 'Generate risk assessments with controls & ratings' },
+  { id: 'checklist', label: 'Inspection Checklist', icon: ClipboardCheck, desc: 'Generate site-specific inspection checklists' },
 ];
 
-import { AlertTriangle, AlertOctagon, ClipboardCheck, BookOpen } from 'lucide-react';
+const DOC_TYPES = [
+  'Health & Safety Policy', 'Method Statement', 'Safe Work Procedure',
+  'Emergency Response Plan', 'Fall Protection Plan', 'Traffic Management Plan',
+  'Toolbox Talk', 'Induction Checklist', 'Construction Work Permit',
+  'Environmental Management Plan', 'Site Establishment Plan',
+];
 
 export default function AIGeneratorPage() {
   const { user } = useAuth();
-  const [mode, setMode] = useState<GenMode>('template');
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
-  const [prompt, setPrompt] = useState('');
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
+  const [mode, setMode] = useState('document');
+  const [docType, setDocType] = useState('Health & Safety Policy');
+  const [projectContext, setProjectContext] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [result, setResult] = useState('');
+  const [resultHtml, setResultHtml] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [uploadResult, setUploadResult] = useState('');
+  const [tab, setTab] = useState<'generate' | 'upload' | 'history'>('generate');
+  const [aiProvider, setAiProvider] = useState<'auto' | 'gemini'>('gemini');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleGenerate() {
-    if ((mode === 'template' && !selectedTemplate) || (mode !== 'template' && !prompt.trim())) return;
-    setGenerating(true);
-    setSaved(false);
-
-    const templatePrefixes: Record<string, string> = {
-      safety_plan: 'SITE-SPECIFIC SAFETY PLAN\n\nProject: [Project Name]\nDate: [Date]\n\n1. SCOPE OF WORK\n2. HAZARD IDENTIFICATION\n3. RISK ASSESSMENT\n4. CONTROL MEASURES\n5. EMERGENCY PROCEDURES\n6. TRAINING REQUIREMENTS\n7. MONITORING & REVIEW\n\n',
-      risk_assessment: 'RISK ASSESSMENT\n\n| Activity | Hazard | Risk | Likelihood | Severity | Score | Control Measures |\n|----------|--------|------|-----------|---------|-------|------------------|\n| Excavation | Collapse | High | 3 | 5 | 15 | Shoring, battering, daily inspection |\n| Working at height | Fall | Critical | 4 | 5 | 20 | Guardrails, harness, training |\n| Lifting operations | Crush injury | High | 3 | 4 | 12 | Exclusion zone, competent operator |\n',
-      method_statement: 'SAFE WORK METHOD STATEMENT\n\nTask: [Task Name]\nLocation: [Location]\n\nStep 1: Preparation\n- Hazards: [List hazards]\n- Controls: [List controls]\n\nStep 2: Execution\n- Hazards: [List hazards]\n- Controls: [List controls]\n\nStep 3: Completion\n- Hazards: [List hazards]\n- Controls: [List controls]\n',
-      incident_report: 'INCIDENT REPORT\n\nDate of Incident: [Date]\nTime: [Time]\nLocation: [Location]\n\nIncident Type: [Near Miss / First Aid / Medical Treatment / Lost Time / Fatality]\n\nDescription:\n[Detailed description]\n\nImmediate Actions Taken:\n[Actions]\n\nRoot Cause Analysis:\n[Analysis]\n\nCorrective Actions:\n[Actions]\n',
-      inspection_checklist: 'INSPECTION CHECKLIST\n\nArea: [Area]\nInspector: [Name]\nDate: [Date]\n\n| # | Item | Compliant | N/A | Remarks |\n|---|------|-----------|-----|---------|\n| 1 | Housekeeping | ☐ | ☐ | |\n| 2 | Access/Egress | ☐ | ☐ | |\n| 3 | Fire equipment | ☐ | ☐ | |\n| 4 | PPE compliance | ☐ | ☐ | |\n| 5 | Electrical safety | ☐ | ☐ | |\n| 6 | Scaffolding | ☐ | ☐ | |\n| 7 | Excavations | ☐ | ☐ | |\n| 8 | Plant & Equipment | ☐ | ☐ | |\n| 9 | Hazardous substances | ☐ | ☐ | |\n| 10 | Emergency signage | ☐ | ☐ | |\n\nScore: /10 = %\n',
-      training_record: 'TRAINING RECORD\n\nCourse: [Course Name]\nTrainer: [Trainer Name]\nDate: [Date]\n\n| Name | ID Number | Signature |\n|------|-----------|-----------|\n| | | |\n| | | |\n| | | |\n| | | |\n',
-    };
-
-    let generatedContent = '';
-    if (mode === 'template' && selectedTemplate) {
-      generatedContent = templatePrefixes[selectedTemplate] || `# ${templates.find(t => t.id === selectedTemplate)?.label || 'Document'}\n\nGenerated content will appear here.\n`;
-      setTitle(templates.find(t => t.id === selectedTemplate)?.label || 'Generated Document');
-    } else if (mode === 'smart') {
-      generatedContent = `# AI-Generated Document\n\nPrompt: ${prompt}\n\n---\n\nBased on your requirements, here is the generated document:\n\n## 1. Overview\n${prompt}\n\n## 2. Details\n- Created using AI Smart mode\n- Optimized for SAFESTACK platform\n- Compliant with SA OHS standards\n\n## 3. Document Content\n\nThis document was generated based on the prompt you provided. Review and edit as needed to ensure accuracy and completeness.\n\n### Key Considerations:\n- Applicable regulations: OHSA, Construction Regulations 2014\n- Site-specific factors to verify\n- Training and competency requirements\n- Emergency procedures\n`;
-      setTitle(title || 'AI-Generated Document');
-    } else {
-      generatedContent = `# ${title || 'Custom Document'}\n\n${prompt}\n\n---\n\n*Generated by SAFESTACK AI at ${new Date().toLocaleString('en-ZA')}*\n`;
-    }
-
-    setContent(generatedContent);
-    setGenerating(false);
+  async function loadHistory() {
+    if (!user) return;
+    setLoadingHistory(true);
+    const { data } = await supabase.from('ai_generations').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
+    if (data) setHistory(data);
+    setLoadingHistory(false);
   }
 
-  async function handleSave() {
-    if (!user || !title.trim() || !content.trim()) return;
-    const { error } = await supabase.from('ai_documents').insert({
-      user_id: user.id, title, doc_type: mode, prompt, content, status: 'completed',
-    });
-    if (!error) setSaved(true);
+  async function generate() {
+    setGenerating(true);
+    setResult('');
+    setResultHtml('');
+    setEditing(false);
+    try {
+      let prompt = '';
+      if (mode === 'document') {
+        prompt = 'Generate a professional ' + docType + ' for a construction project in South Africa.\n\nProject Context: ' + (projectContext || 'General construction site') + '\n\nInclude: Clear purpose and scope, Legal references to OHS Act 85 of 1993, Specific responsibilities for all roles, Practical implementation steps, Review and approval process';
+      } else if (mode === 'risk') {
+        prompt = 'Generate a comprehensive risk assessment for a construction project in South Africa.\n\nProject Context: ' + (projectContext || 'General construction site') + '\n\nInclude: At least 8 specific hazards with detailed descriptions, Risk ratings (L x S = R) with proper scoring, Specific control measures for each hazard, Residual risk ratings after controls, Review and approval section';
+      } else {
+        prompt = 'Generate a detailed inspection checklist for a construction project in South Africa.\n\nProject Context: ' + (projectContext || 'General construction site') + '\n\nInclude: At least 20 specific check items across categories, Yes/No/N/A columns, Comments section for each item, Inspector sign-off section, Date and project reference fields';
+      }
+      const systemMsg = 'You are a professional OHS document writer for construction in South Africa. Generate comprehensive, regulation-compliant documents in valid Markdown with proper headings, tables, and formatting.';
+            let content;
+      if (aiProvider === 'gemini') {
+        content = await callGemini(systemMsg, prompt);
+      } else {
+        content = await callAI(systemMsg, prompt);
+      }
+      setResult(content);
+      const html = await generateDocumentHTML(content);
+      setResultHtml(html);
+    } catch (err: any) {
+      setResult('Error: ' + (err.message || 'Generation failed'));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function startEdit() { setEditContent(result); setEditing(true); setShowPreview(false); }
+  function saveEdit() { setResult(editContent); setEditing(false); }
+
+  function downloadDoc() {
+    const blob = new Blob([result], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement('a');
+    a.href = url;
+    a.download = docType.replace(/\\s+/g, '_') + '.md';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadHTML() {
+    const fullHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + docType + '</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}h1,h2{color:#1a365d}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px}</style></head><body>' + resultHtml + '</body></html>';
+    const blob = new Blob([fullHtml], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement('a');
+    a.href = url;
+    a.download = docType.replace(/\\s+/g, '_') + '.html';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function useHistoryItem(item: any) {
+    setResult(item.generated_content || '');
+    setMode(item.generation_type || 'document');
+    setResultHtml('');
+    setEditing(false);
+    setTab('generate');
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDoc(true);
+    setUploadResult('');
+    try {
+      const text = await file.text();
+      const sysMsg = 'You are an OHS document analyst. Extract key information, risks, legislative references, and compliance gaps. Format as Markdown.';
+      const analysis = await callAI(sysMsg, 'Analyze this OHS document and extract all key information:\\n\\n' + text.slice(0, 15000));
+      setUploadResult(analysis);
+    } catch (err: any) {
+      setUploadResult('Error: ' + (err.message || 'Analysis failed'));
+    } finally {
+      setUploadingDoc(false);
+    }
   }
 
   return (
-    <div>
-      <div className="page-header">
-        <div><h1 className="page-title">AI Document Generator</h1><p className="text-surface-500 mt-1">Generate OHS documents in three modes</p></div>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">AI Document Generator</h1>
+        <p className="text-gray-500 text-sm mt-1">Generate, upload, and manage OHS documents with AI</p>
       </div>
 
-      <div className="flex gap-2 mb-6 bg-surface-100 p-1 rounded-xl w-fit">
-        {(['template', 'smart', 'custom'] as GenMode[]).map(m => (
-          <button key={m} onClick={() => { setMode(m); setSelectedTemplate(''); setContent(''); }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === m ? 'bg-white text-primary-600 shadow-sm' : 'text-surface-500 hover:text-surface-700'}`}>
-            {m === 'template' ? <><Type className="h-4 w-4 inline mr-1.5" />Templates</> :
-             m === 'smart' ? <><Sparkles className="h-4 w-4 inline mr-1.5" />Smart</> :
-             <><FileText className="h-4 w-4 inline mr-1.5" />Custom</>}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+        {(['generate', 'upload', 'history'] as const).map(t => (
+          <button key={t} onClick={() => { setTab(t); if (t === 'history') loadHistory(); }}
+            className={'px-4 py-2 rounded-lg text-sm font-medium capitalize ' + (tab === t ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
+            {t === 'generate' && <><Bot className="h-4 w-4 inline mr-1.5 -mt-0.5" />Generate</>}
+            {t === 'upload' && <><Upload className="h-4 w-4 inline mr-1.5 -mt-0.5" />Upload &amp; Analyze</>}
+            {t === 'history' && <><FileText className="h-4 w-4 inline mr-1.5 -mt-0.5" />History</>}
           </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card">
-          <div className="card-header"><h2 className="section-title">
-            {mode === 'template' ? 'Choose a Template' : mode === 'smart' ? 'Describe What You Need' : 'Custom Document'}
-          </h2></div>
-          <div className="card-body space-y-4">
-            {mode === 'template' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {templates.map(t => (
-                  <button key={t.id} onClick={() => { setSelectedTemplate(t.id); setContent(''); }}
-                    className={`p-3 rounded-xl border text-left transition-all ${selectedTemplate === t.id ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-surface-200 hover:border-primary-300 hover:bg-surface-50'}`}>
-                    <t.icon className="h-5 w-5 text-primary-600 mb-2" />
-                    <p className="text-sm font-medium">{t.label}</p>
-                    <p className="text-xs text-surface-500 mt-0.5">{t.desc}</p>
-                  </button>
-                ))}
-              </div>
-            )}
+      <div className="flex items-center gap-2 mt-3 sm:mt-0 sm:ml-3">
+        <span className="text-xs text-gray-400 font-medium">AI Provider:</span>
+        <button onClick={() => setAiProvider('gemini')}
+          className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (aiProvider === 'gemini' ? 'bg-green-600 text-white shadow-sm' : 'bg-white border text-gray-600 hover:bg-gray-50')}>
+          <Bot className="h-3.5 w-3.5 inline -mt-0.5 mr-1" />Gemini
+        </button>
+        <button onClick={() => setAiProvider('auto')}
+          className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (aiProvider === 'auto' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border text-gray-600 hover:bg-gray-50')}>
+          Auto (Fallback)
+        </button>
+        {aiProvider === 'gemini' && (
+          <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+            <Check className="h-3 w-3" />Primary
+          </span>
+        )}
+      </div>
 
-            {mode === 'smart' && (
-              <>
-                <div><label className="label">Title</label><input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g., Excavation Safety Plan" /></div>
-                <div><label className="label">Describe the document you need *</label><textarea className="input" rows={6} value={prompt} onChange={e => setPrompt(e.target.value)}
-                  placeholder="Describe the document you need. Include project type, hazards, controls, and any specific requirements. The AI will generate a comprehensive document..." /></div>
-              </>
-            )}
-
-            {mode === 'custom' && (
-              <>
-                <div><label className="label">Document Title *</label><input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g., Fall Protection Plan" /></div>
-                <div><label className="label">Content / Instructions *</label><textarea className="input" rows={6} value={prompt} onChange={e => setPrompt(e.target.value)}
-                  placeholder="Write or paste your document content. You can include markdown formatting..." /></div>
-              </>
-            )}
-
-            <button onClick={handleGenerate} disabled={generating || (mode === 'template' && !selectedTemplate) || (mode !== 'template' && !prompt.trim())}
-              className="btn-primary w-full justify-center">
-              {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</> : <><Bot className="h-4 w-4" /> Generate Document</>}
-            </button>
+      {tab === 'generate' && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {MODES.map(m => (
+              <button key={m.id} onClick={() => { setMode(m.id); setResult(''); setResultHtml(''); }}
+                className={'bg-white rounded-xl shadow-sm border p-5 text-left hover:shadow-md transition-all ' + (mode === m.id ? 'ring-2 ring-blue-500 bg-blue-50/30' : '')}>
+                <div className={'w-10 h-10 rounded-xl flex items-center justify-center mb-3 ' + (mode === m.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600')}><m.icon className="h-5 w-5" /></div>
+                <h3 className="font-semibold text-sm">{m.label}</h3>
+                <p className="text-xs text-gray-500 mt-1">{m.desc}</p>
+              </button>
+            ))}
           </div>
-        </div>
 
-        <div className="card">
-          <div className="card-header flex items-center justify-between">
-            <h2 className="section-title">Preview</h2>
-            {content && (
-              <div className="flex gap-2">
-                <button onClick={handleSave} className="btn-primary btn-sm" disabled={!user || saved}>
-                  {saved ? 'Saved!' : 'Save Document'}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border">
+              <div className="px-6 py-4 border-b"><h2 className="font-semibold">Input</h2></div>
+              <div className="p-6 space-y-4">
+                {mode === 'document' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
+                    <select className="w-full px-3 py-2 border rounded-lg text-sm" value={docType} onChange={e => setDocType(e.target.value)}>
+                      {DOC_TYPES.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Project Context</label>
+                  <textarea className="w-full px-3 py-2 border rounded-lg text-sm resize-none" rows={4}
+                    placeholder="e.g., 3-storey office building, Bedfordview, 12-month project"
+                    value={projectContext} onChange={e => setProjectContext(e.target.value)} />
+                </div>
+                <button onClick={generate} disabled={generating}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</> : <><Bot className="h-4 w-4" /> Generate Document</>}
                 </button>
               </div>
-            )}
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border">
+              <div className="px-6 py-4 border-b flex items-center justify-between">
+                <h2 className="font-semibold">Output</h2>
+                {result && (
+                  <div className="flex items-center gap-2">
+                    {resultHtml && (
+                      <button onClick={() => setShowPreview(!showPreview)}
+                        className="flex items-center gap-1 text-xs px-2.5 py-1.5 border rounded-lg hover:bg-gray-50">
+                        <Eye className="h-3 w-3" />{showPreview ? 'Markdown' : 'Preview'}
+                      </button>
+                    )}
+                    <button onClick={startEdit}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1.5 border rounded-lg hover:bg-gray-50">
+                      <Edit3 className="h-3 w-3" /> Edit
+                    </button>
+                    <button onClick={downloadDoc}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1.5 border rounded-lg hover:bg-gray-50">
+                      <Download className="h-3 w-3" /> .md
+                    </button>
+                    {resultHtml && (
+                      <button onClick={downloadHTML}
+                        className="flex items-center gap-1 text-xs px-2.5 py-1.5 border rounded-lg hover:bg-gray-50">
+                        <Download className="h-3 w-3" /> .html
+                      </button>
+                    )}
+                    <button onClick={async () => { await navigator.clipboard.writeText(result); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1.5 border rounded-lg hover:bg-gray-50">
+                      {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}{copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="p-6">
+                {!result ? (
+                  <div className="text-center py-12 text-gray-400">
+                    <Bot className="h-12 w-12 mx-auto mb-2" />
+                    <p>{generating ? 'Generating...' : 'Configure options and click Generate'}</p>
+                  </div>
+                ) : editing ? (
+                  <div className="space-y-3">
+                    <textarea className="w-full h-[400px] px-3 py-2 border rounded-lg text-sm font-mono resize-none"
+                      value={editContent} onChange={e => setEditContent(e.target.value)} />
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                        <Save className="h-3 w-3" /> Save
+                      </button>
+                      <button onClick={() => setEditing(false)}
+                        className="flex items-center gap-1 px-3 py-1.5 border text-sm rounded-lg hover:bg-gray-50">
+                        <X className="h-3 w-3" /> Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : showPreview && resultHtml ? (
+                  <div className="border rounded-lg p-4 max-h-[500px] overflow-y-auto prose prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: resultHtml }} />
+                ) : (
+                  <pre className="whitespace-pre-wrap text-sm font-sans bg-gray-50 p-4 rounded-xl max-h-[500px] overflow-y-auto">{result}</pre>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="card-body">
-            {!content ? (
-              <div className="text-center py-12 text-surface-400">
-                <FileText className="h-12 w-12 mx-auto mb-3 text-surface-300" />
-                <p className="font-medium">No content yet</p>
-                <p className="text-sm mt-1">Select a template or describe what you need</p>
+        </>
+      )}
+
+      {tab === 'upload' && (
+        <div className="bg-white rounded-xl shadow-sm border p-6">
+          <div className="text-center py-8">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FileUp className="h-8 w-8 text-blue-600" />
+            </div>
+            <h2 className="text-lg font-semibold mb-2">Upload Document for AI Analysis</h2>
+            <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
+              Upload any OHS document (PDF, DOCX, TXT) and our AI will extract and organize all key information
+            </p>
+            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc,.txt,.csv" onChange={handleFileUpload} className="hidden" />
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {uploadingDoc ? <><Loader2 className="h-4 w-4 animate-spin" /> Analyzing...</> : <><Upload className="h-4 w-4" /> Select &amp; Upload</>}
+            </button>
+          </div>
+          {uploadResult && (
+            <div className="mt-6 border-t pt-6">
+              <h3 className="font-semibold mb-3">Analysis Result</h3>
+              <div className="bg-gray-50 p-4 rounded-xl">
+                <pre className="whitespace-pre-wrap text-sm font-sans max-h-[500px] overflow-y-auto">{uploadResult}</pre>
+              </div>
+              <button onClick={async () => { await navigator.clipboard.writeText(uploadResult); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                className="flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 mt-3">
+                {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}{copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="bg-white rounded-xl shadow-sm border">
+          <div className="px-6 py-4 border-b"><h2 className="font-semibold">Generation History</h2></div>
+          <div className="divide-y">
+            {loadingHistory ? (
+              <div className="p-6 text-center text-gray-400">
+                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />Loading...
+              </div>
+            ) : history.length === 0 ? (
+              <div className="p-6 text-center text-gray-400">
+                <FileText className="h-8 w-8 mx-auto mb-2" />No previous generations found
               </div>
             ) : (
-              <div className="prose prose-sm max-w-none">
-                <pre className="whitespace-pre-wrap font-sans text-sm text-surface-700">{content}</pre>
-              </div>
+              history.map((item: any) => (
+                <button key={item.id} onClick={() => useHistoryItem(item)}
+                  className="w-full px-6 py-4 text-left hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium capitalize">{item.generation_type}: {item.prompt?.slice(0, 60)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{item.created_at ? formatDate(item.created_at) : 'Unknown'} &middot; {item.model_used || 'N/A'}</p>
+                    </div>
+                    <span className="text-xs text-gray-400">{(item.tokens_used || 0).toLocaleString()} chars</span>
+                  </div>
+                </button>
+              ))
             )}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
